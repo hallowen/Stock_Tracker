@@ -147,16 +147,21 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
 
     prompt_lines.extend([
         "",
-        "For each stock, provide a one-line recommendation (Buy / Hold / Sell) with a short reason (max 15 words).",
-        "Format: SYMBOL — Buy/Hold/Sell — reason",
-        "Be concise and practical.",
+        "RULES:",
+        "1. Provide a recommendation for EACH stock in the watchlist.",
+        "2. Use EXACTLY this format per stock:",
+        "   [SYMBOL] → BUY / HOLD / SELL — [one short reason]",
+        "3. BUY = price up > 2% or positive trend",
+        "4. HOLD = price change between -2% and +2%",
+        "5. SELL = price down > 2% or negative trend",
+        "6. Be direct. No intro, no outro, no disclaimers.",
     ])
 
     system_prompt = (
         "You are a professional stock market analyst. "
-        "Provide clear, concise recommendations based on price change data. "
-        "Use Buy for strong uptrend, Hold for neutral, Sell for downtrend. "
-        "Be direct — no disclaimers needed."
+        "Analyze price change data and give per-stock recommendations. "
+        "Always output one line per stock. "
+        "Never skip a stock. Never add commentary outside the recommendations."
     )
 
     try:

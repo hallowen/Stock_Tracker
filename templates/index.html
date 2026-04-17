@@ -617,8 +617,12 @@
         }
 
         function showRecommendations(text) {
+            // If it's an error/warning message, show as snackbar instead
+            if (text.startsWith("⚠️") || text.startsWith("Your watchlist is empty")) {
+                showStatus(text, "error");
+                return;
+            }
             var list = document.getElementById("stockList");
-            // Insert recommendations card at top
             var recCard = document.createElement("li");
             recCard.className = "rec-card";
             recCard.innerHTML =
