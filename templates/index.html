@@ -2,213 +2,483 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f1b0f">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Stock Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --md-primary: #a8ff5c;
+            --md-on-primary: #1a3a0a;
+            --md-surface: #0f1b0f;
+            --md-surface-variant: #1a2e1a;
+            --md-surface-container: #142514;
+            --md-outline: #3a5a3a;
+            --md-outline-variant: #2a4a2a;
+            --md-on-surface: #c8e6c8;
+            --md-on-surface-variant: #8aaa8a;
+            --md-inverse-surface: #3a5a3a;
+            --md-inverse-on-surface: #e0ffe0;
+            --md-error: #ff5c6c;
+            --md-success: #5cff8a;
+            --md-warning: #ffcf5c;
+            --md-info: #5cc8ff;
+            --md-primary-container: #1a4a0a;
+            --md-on-primary-container: #c0ffb0;
+            --md-radius-xs: 8px;
+            --md-radius-sm: 12px;
+            --md-radius-md: 16px;
+            --md-radius-lg: 24px;
+            --md-radius-xl: 28px;
+            --md-radius-full: 9999px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0e17;
-            color: #e0e0e0;
+            font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--md-surface);
+            color: var(--md-on-surface);
             min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===== Top App Bar ===== */
+        .app-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--md-surface);
+            padding: 16px 20px 12px;
             display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .app-bar-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
             justify-content: center;
-            padding: 40px 20px;
+            font-size: 22px;
+            flex-shrink: 0;
         }
-        .container { max-width: 600px; width: 100%; }
-        h1 {
-            font-size: 2rem;
-            text-align: center;
-            margin-bottom: 8px;
-            background: linear-gradient(135deg, #00d2ff, #7b2ff7);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+        .app-bar-content { flex: 1; }
+        .app-bar h1 {
+            font-size: 1.35rem;
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            color: var(--md-on-surface);
         }
-        .subtitle { text-align: center; color: #666; margin-bottom: 32px; font-size: 0.9rem; }
-        .add-form {
+        .app-bar-subtitle {
+            font-size: 0.78rem;
+            color: var(--md-on-surface-variant);
+            margin-top: 1px;
+            letter-spacing: 0.02em;
+        }
+
+        /* ===== Search Bar ===== */
+        .search-container {
+            padding: 4px 16px 12px;
+        }
+        .search-bar {
             display: flex;
-            gap: 10px;
-            margin-bottom: 32px;
+            align-items: center;
+            gap: 12px;
+            background: var(--md-surface-container);
+            border: 1px solid var(--md-outline);
+            border-radius: var(--md-radius-full);
+            padding: 0 16px;
+            height: 56px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        .add-form input {
+        .search-bar:focus-within {
+            border-color: var(--md-primary);
+            box-shadow: 0 0 0 1px var(--md-primary);
+        }
+        .search-icon {
+            font-size: 20px;
+            color: var(--md-on-surface-variant);
+            flex-shrink: 0;
+        }
+        .search-bar input {
             flex: 1;
-            padding: 12px 16px;
-            border: 1px solid #1e2a3a;
-            border-radius: 8px;
-            background: #111827;
-            color: #fff;
-            font-size: 1rem;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .add-form input:focus { border-color: #7b2ff7; }
-        .add-form input::placeholder { color: #444; }
-        .add-form button {
-            padding: 12px 24px;
+            background: none;
             border: none;
-            border-radius: 8px;
-            background: linear-gradient(135deg, #00d2ff, #7b2ff7);
-            color: #fff;
+            outline: none;
+            color: var(--md-on-surface);
+            font-family: inherit;
             font-size: 1rem;
-            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .search-bar input::placeholder {
+            color: var(--md-on-surface-variant);
+            text-transform: none;
+            font-weight: 400;
+        }
+        .search-btn {
+            background: var(--md-primary);
+            color: var(--md-on-primary);
+            border: none;
+            border-radius: var(--md-radius-full);
+            padding: 10px 24px;
+            font-family: 'Google Sans', sans-serif;
+            font-size: 0.875rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
             cursor: pointer;
-            transition: opacity 0.2s;
+            transition: opacity 0.15s, box-shadow 0.15s;
             white-space: nowrap;
         }
-        .add-form button:hover { opacity: 0.85; }
-        .add-form button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .status-msg {
+        .search-btn:hover { box-shadow: 0 1px 3px rgba(168,255,92,0.3); }
+        .search-btn:active { opacity: 0.85; }
+        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ===== Snackbar ===== */
+        .snackbar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(120px);
+            background: var(--md-inverse-surface);
+            color: var(--md-inverse-on-surface);
+            padding: 14px 24px;
+            border-radius: var(--md-radius-xs);
+            font-size: 0.875rem;
+            font-weight: 400;
+            letter-spacing: 0.02em;
+            z-index: 200;
+            opacity: 0;
+            transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease;
+            max-width: calc(100vw - 48px);
             text-align: center;
-            margin-bottom: 16px;
-            font-size: 0.9rem;
-            min-height: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         }
-        .status-msg.success { color: #00d26a; }
-        .status-msg.error { color: #ff4d6a; }
-        .stock-list { list-style: none; }
-        .stock-item {
+        .snackbar.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        .snackbar.error { background: var(--md-error); color: #fff; }
+        .snackbar.success { background: var(--md-success); color: #0a2a0a; }
+
+        /* ===== List ===== */
+        .stock-list {
+            list-style: none;
+            padding: 8px 16px 100px;
+        }
+
+        /* ===== Stock Card ===== */
+        .stock-card {
+            background: var(--md-surface-container);
+            border-radius: var(--md-radius-md);
+            margin-bottom: 8px;
+            overflow: hidden;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            animation: cardIn 0.35s cubic-bezier(0.2, 0, 0, 1) both;
+        }
+        .stock-card:active {
+            transform: scale(0.98);
+        }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(16px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .card-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 16px 20px;
-            margin-bottom: 10px;
-            background: #111827;
-            border: 1px solid #1e2a3a;
-            border-radius: 10px;
-            transition: border-color 0.2s, transform 0.15s;
+            padding: 16px 16px 4px;
         }
-        .stock-item:hover {
-            border-color: #3a4a5a;
-            transform: translateY(-1px);
-        }
-        .stock-symbol {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #fff;
-        }
-        .stock-price {
+        .card-symbol {
             font-size: 1.1rem;
-            font-weight: 600;
-            color: #e0e0e0;
-            margin-top: 4px;
+            font-weight: 500;
+            color: var(--md-on-surface);
+            letter-spacing: 0.04em;
         }
-        .stock-change {
-            font-size: 0.85rem;
-            margin-top: 2px;
-        }
-        .stock-change.positive { color: #00d26a; }
-        .stock-change.negative { color: #ff4d6a; }
-        .stock-change.neutral { color: #888; }
-        .stock-market-state {
-            font-size: 0.75rem;
-            color: #555;
-            margin-top: 2px;
-        }
-        .stock-added { font-size: 0.75rem; color: #555; margin-top: 2px; }
-        .delete-btn {
-            padding: 8px 14px;
-            border: 1px solid #3a1a1a;
-            border-radius: 6px;
-            background: #1a0a0a;
-            color: #ff4d6a;
-            font-size: 0.85rem;
+        .card-delete {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: transparent;
+            color: var(--md-on-surface-variant);
+            border-radius: var(--md-radius-full);
             cursor: pointer;
-            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: background 0.15s, color 0.15s;
         }
-        .delete-btn:hover { background: #2a1515; }
+        .card-delete:hover {
+            background: rgba(255,92,108,0.12);
+            color: var(--md-error);
+        }
+
+        .card-body {
+            padding: 4px 16px 16px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+        }
+        .card-price-info { flex: 1; }
+        .card-price {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--md-on-surface);
+            letter-spacing: -0.02em;
+        }
+        .card-change {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-top: 2px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .card-change.positive { color: var(--md-success); }
+        .card-change.negative { color: var(--md-error); }
+        .card-change.neutral { color: var(--md-on-surface-variant); }
+
+        .card-chips {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: var(--md-radius-full);
+            font-size: 0.7rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+        .chip-market {
+            background: var(--md-primary-container);
+            color: var(--md-on-primary-container);
+        }
+        .chip-currency {
+            background: var(--md-surface-variant);
+            color: var(--md-on-surface-variant);
+            border: 1px solid var(--md-outline-variant);
+        }
+        .chip-added {
+            background: transparent;
+            color: var(--md-on-surface-variant);
+            font-size: 0.65rem;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .card-divider {
+            height: 1px;
+            background: var(--md-outline-variant);
+            margin: 0 16px;
+        }
+
+        .no-data {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--md-on-surface-variant);
+        }
+
+        /* ===== Empty State ===== */
         .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 64px 24px;
             text-align: center;
-            padding: 60px 20px;
-            color: #444;
         }
-        .empty-state svg { margin-bottom: 16px; }
-        .empty-state p { font-size: 0.95rem; }
-        @media (max-width: 500px) {
-            .stock-item { flex-wrap: wrap; gap: 10px; }
-            .delete-btn { width: 100%; text-align: center; }
-            .add-form { flex-direction: column; }
+        .empty-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: var(--md-radius-lg);
+            background: var(--md-primary-container);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            margin-bottom: 20px;
+        }
+        .empty-title {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--md-on-surface);
+            margin-bottom: 6px;
+        }
+        .empty-subtitle {
+            font-size: 0.85rem;
+            color: var(--md-on-surface-variant);
+            max-width: 260px;
+            line-height: 1.5;
+        }
+
+        /* ===== Loading ===== */
+        .loading {
+            display: flex;
+            justify-content: center;
+            padding: 48px;
+        }
+        .loading-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--md-primary);
+            margin: 0 4px;
+            animation: bounce 1.2s infinite ease-in-out;
+        }
+        .loading-dot:nth-child(2) { animation-delay: 0.15s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 400px) {
+            .card-body { flex-direction: column; gap: 10px; align-items: flex-start; }
+            .card-chips { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Stock Tracker</h1>
-        <p class="subtitle">Track your stock watchlist</p>
-        <form class="add-form" id="addForm">
-            <input type="text" id="symbolInput" placeholder="Enter stock symbol (e.g., AAPL)" required maxlength="10" autocomplete="off">
-            <button type="submit" id="addBtn">Add Stock</button>
+    <!-- Top App Bar -->
+    <header class="app-bar">
+        <div class="app-bar-icon">📈</div>
+        <div class="app-bar-content">
+            <h1>Stock Tracker</h1>
+            <div class="app-bar-subtitle">Real-time watchlist</div>
+        </div>
+    </header>
+
+    <!-- Search Bar -->
+    <div class="search-container">
+        <form class="search-bar" id="addForm">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="symbolInput" placeholder="Search symbol…" required maxlength="10" autocomplete="off" inputmode="uppercase">
+            <button type="submit" id="addBtn" class="search-btn">Add</button>
         </form>
-        <div class="status-msg" id="statusMsg"></div>
-        <ul class="stock-list" id="stockList"></ul>
     </div>
+
+    <!-- Snackbar -->
+    <div class="snackbar" id="statusMsg"></div>
+
+    <!-- Stock List -->
+    <ul class="stock-list" id="stockList">
+        <li class="loading">
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+        </li>
+    </ul>
+
     <script>
         const API = "";
 
         function showStatus(msg, type) {
             var el = document.getElementById("statusMsg");
             el.textContent = msg;
-            el.className = "status-msg " + type;
-            if (type === "success") {
-                setTimeout(function() { el.textContent = ""; el.className = "status-msg"; }, 3000);
-            }
+            el.className = "snackbar " + (type || "");
+            // force reflow for re-triggering animation
+            el.offsetHeight;
+            requestAnimationFrame(() => el.classList.add("show"));
+            setTimeout(function() {
+                el.classList.remove("show");
+                setTimeout(function() { el.textContent = ""; el.className = "snackbar"; }, 300);
+            }, 3000);
         }
 
         function formatDate(iso) {
             return new Date(iso).toLocaleDateString("en-US", {
-                month: "short", day: "numeric", year: "numeric",
-                hour: "2-digit", minute: "2-digit"
+                month: "short", day: "numeric", year: "numeric"
             });
+        }
+
+        function priceArrow(pct) {
+            if (!pct || pct === 0) return "▬";
+            return pct > 0 ? "▲" : "▼";
         }
 
         async function renderStocks() {
             var list = document.getElementById("stockList");
+            list.innerHTML = '<li class="loading"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></li>';
             try {
                 var res = await fetch(API + "/stocks");
                 if (!res.ok) throw new Error("Failed to fetch stocks");
                 var stocks = await res.json();
                 if (stocks.length === 0) {
-                    list.innerHTML = '<div class="empty-state"><svg width="48" height="48" fill="none" stroke="#333" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 17l4-4 4 4 4-8 4 4"/></svg><p>Your watchlist is empty.<br>Add a stock symbol above to get started.</p></div>';
+                    list.innerHTML = '<li class="empty-state">' +
+                        '<div class="empty-icon">📋</div>' +
+                        '<div class="empty-title">Watchlist is empty</div>' +
+                        '<div class="empty-subtitle">Add a stock symbol above to start tracking your favorite tickers.</div>' +
+                        '</li>';
                     return;
                 }
                 list.innerHTML = "";
                 for (var i = 0; i < stocks.length; i++) {
                     var stock = stocks[i];
                     var li = document.createElement("li");
-                    li.className = "stock-item";
+                    li.className = "stock-card";
+                    li.style.animationDelay = (i * 0.06) + "s";
+
+                    var changeClass = "neutral";
+                    var changeSign = "▬";
+                    if (stock.change !== null && stock.change !== undefined) {
+                        if (stock.change > 0) { changeClass = "positive"; changeSign = "▲ +"; }
+                        else if (stock.change < 0) { changeClass = "negative"; changeSign = "▼ "; }
+                        else { changeSign = "▬ "; }
+                    }
 
                     var priceDisplay = "";
                     if (stock.price !== null && stock.price !== undefined) {
-                        var changeClass = "";
-                        var changeSign = "";
-                        if (stock.change !== null && stock.change !== undefined) {
-                            if (stock.change > 0) {
-                                changeClass = "positive";
-                                changeSign = "+";
-                            } else if (stock.change < 0) {
-                                changeClass = "negative";
-                                changeSign = "";
-                            } else {
-                                changeClass = "neutral";
-                                changeSign = "";
-                            }
-                        }
-                        var currency = stock.currency || "";
-                        priceDisplay = '<div class="stock-price">$' + stock.price.toFixed(2) + ' ' + currency + '</div>' +
-                            '<div class="stock-change ' + changeClass + '">' + changeSign + (stock.change !== null ? stock.change.toFixed(2) : '0.00') + ' (' + (stock.change_pct !== null ? (stock.change_pct > 0 ? '+' : '') : '') + stock.change_pct + '%)' + '</div>';
+                        var changeText = changeSign + (stock.change !== null ? stock.change.toFixed(2) : "0.00");
+                        var pctText = stock.change_pct !== null ? "(" + (stock.change_pct > 0 ? "+" : "") + stock.change_pct + "%)" : "";
+                        priceDisplay = '<div class="card-price">$' + stock.price.toFixed(2) + '</div>' +
+                            '<div class="card-change ' + changeClass + '">' + changeText + ' ' + pctText + '</div>';
                     } else {
-                        priceDisplay = '<div class="stock-price">No price data</div>';
+                        priceDisplay = '<div class="no-data">No price data</div>';
                     }
 
-                    var marketState = "";
+                    var chipsHTML = '<div class="card-chips">';
                     if (stock.market_state) {
-                        marketState = '<div class="stock-market-state">' + stock.market_state + '</div>';
+                        chipsHTML += '<span class="chip chip-market">' + stock.market_state + '</span>';
                     }
+                    if (stock.currency) {
+                        chipsHTML += '<span class="chip chip-currency">' + stock.currency + '</span>';
+                    }
+                    chipsHTML += '<span class="chip chip-added">Added ' + formatDate(stock.added_at) + '</span>';
+                    chipsHTML += '</div>';
 
-                    li.innerHTML = '<div class="stock-info"><div class="stock-symbol">' + stock.symbol + '</div>' + priceDisplay + marketState + '<div class="stock-added">Added ' + formatDate(stock.added_at) + '</div></div><button class="delete-btn" data-symbol="' + stock.symbol + '">Delete</button>';
+                    li.innerHTML =
+                        '<div class="card-header">' +
+                            '<span class="card-symbol">' + stock.symbol + '</span>' +
+                            '<button class="card-delete" data-symbol="' + stock.symbol + '" title="Remove">🗑</button>' +
+                        '</div>' +
+                        '<div class="card-divider"></div>' +
+                        '<div class="card-body">' +
+                            '<div class="card-price-info">' + priceDisplay + '</div>' +
+                            chipsHTML +
+                        '</div>';
                     list.appendChild(li);
                 }
             } catch (e) {
                 showStatus("Failed to load stocks", "error");
+                list.innerHTML = '<li class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Load failed</div><div class="empty-subtitle">Check your connection and try again.</div></li>';
             }
         }
 
@@ -221,7 +491,7 @@
                 });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.detail || "Failed to add");
-                showStatus(data.symbol + " added to watchlist", "success");
+                showStatus(data.symbol + " added", "success");
                 await renderStocks();
             } catch (e) {
                 showStatus(e.message, "error");
@@ -232,7 +502,7 @@
             try {
                 var res = await fetch(API + "/stocks/" + symbol, { method: "DELETE" });
                 if (!res.ok) throw new Error("Failed to delete");
-                showStatus(symbol + " removed from watchlist", "success");
+                showStatus(symbol + " removed", "success");
                 await renderStocks();
             } catch (e) {
                 showStatus(e.message, "error");
@@ -250,8 +520,9 @@
         });
 
         document.getElementById("stockList").addEventListener("click", async function(e) {
-            if (e.target.classList.contains("delete-btn")) {
-                var symbol = e.target.dataset.symbol;
+            var btn = e.target.closest(".card-delete");
+            if (btn) {
+                var symbol = btn.dataset.symbol;
                 if (confirm("Remove " + symbol + " from watchlist?")) {
                     await deleteStock(symbol);
                 }
