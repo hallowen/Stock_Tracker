@@ -1,14 +1,74 @@
 import sqlite3
 import os
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 
+import requests
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="Stock Tracker")
+
+# Configuration
+RECOMMENDATION_INTERVAL = int(os.getenv("RECOMMENDATION_INTERVAL", "900"))  # seconds (default 15 min)
+RECOMMENDATIONS_ENABLED = os.getenv("RECOMMENDATIONS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# Global state for tracking signals
+_last_recommendations = {}  # {symbol: recommendation}
+_pending_alerts = []  # list of {symbol, type, reason, timestamp}
+_alerts_lock = threading.Lock()
+_scheduler_task = None
+
+# Lightweight price cache (30s TTL) to speed up repeated polls
+_price_cache = {}  # {symbol: {"data": dict, "ts": float}}
+_PRICE_CACHE_TTL = 30  # seconds
+
+
+def _recommendation_scheduler():
+    """Periodically fetch AI recommendations and detect BUY/SELL signals (runs in background thread)."""
+    global _last_recommendations, _pending_alerts
+    while True:
+        time.sleep(RECOMMENDATION_INTERVAL)
+        try:
+            with get_db() as conn:
+                rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
+                stocks = [dict(row) for row in rows]
+            if not stocks:
+                continue
+
+            stocks_data = []
+            for stock in stocks:
+                price_info = _get_stock_price(stock["symbol"])
+                stock.update(price_info)
+                stocks_data.append(stock)
+
+            rec_data = _get_recommendations(stocks_data)
+            if isinstance(rec_data, str):
+                continue
+
+            new_alerts = []
+            for rec in rec_data:
+                symbol = rec["symbol"]
+                rec_type = rec["recommendation"]
+                reason = rec["reason"]
+                if rec_type in ("BUY", "SELL") and symbol not in _last_recommendations:
+                    new_alerts.append({
+                        "symbol": symbol,
+                        "type": rec_type,
+                        "reason": reason,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                _last_recommendations[symbol] = rec_type
+
+            if new_alerts:
+                with _alerts_lock:
+                    _pending_alerts.extend(new_alerts)
+        except Exception:
+            pass
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stocks.db")
 
@@ -37,8 +97,21 @@ def init_db():
         conn.commit()
 
 
-def _get_stock_price(symbol: str) -> dict:
-    """Fetch current price info for a stock symbol using yfinance."""
+def _get_stock_price(symbol: str, use_cache: bool = True) -> dict:
+    """Fetch current price info for a stock symbol using yfinance (with lightweight TTL cache)."""
+    if use_cache:
+        cached = _price_cache.get(symbol)
+        if cached and (time.time() - cached["ts"]) < _PRICE_CACHE_TTL:
+            return cached["data"]
+
+    price_info = _fetch_stock_price_internal(symbol)
+    if use_cache:
+        _price_cache[symbol] = {"data": price_info, "ts": time.time()}
+    return price_info
+
+
+def _fetch_stock_price_internal(symbol: str) -> dict:
+    """Internal yfinance fetch without cache logic."""
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.fast_info
@@ -112,13 +185,122 @@ class StockInfo(BaseModel):
     last_updated: str | None
 
 
+# LM Studio configuration
+LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://172.237.41.253:8000/v1")
+LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.6-35b-a3b")
+LM_STUDIO_ENABLED = os.getenv("LM_STUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def _parse_recommendations(raw: str) -> list[dict]:
+    """Parse LLM response into per-stock recommendation dict."""
+    recommendations = []
+    lines = raw.strip().split("\n")
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Match patterns like: AAPL → BUY — reason
+        # or: AAPL → HOLD — reason
+        # or: AAPL → SELL — reason
+        import re
+        match = re.match(r'(\w+)\s*[→>]\s*(BUY|HOLD|SELL)\s*—?\s*(.*)', line, re.IGNORECASE)
+        if match:
+            symbol = match.group(1).upper()
+            rec = match.group(2).upper()
+            reason = match.group(3).strip() or "Based on price trend"
+            recommendations.append({
+                "symbol": symbol,
+                "recommendation": rec,
+                "reason": reason,
+            })
+    return recommendations
+
+
+def _get_recommendations(stocks_data: list[dict]) -> str:
+    """Send watchlist data to LM Studio for analysis and return parsed recommendations."""
+    if not LM_STUDIO_ENABLED:
+        return "AI recommendations are disabled. Set LM_STUDIO_ENABLED=true to enable."
+
+    # Build prompt with watchlist data
+    prompt_lines = [
+        "You are a stock market analyst. Analyze the following watchlist and provide brief buy/hold/sell recommendations.",
+        "",
+        "Watchlist data:",
+    ]
+    for stock in stocks_data:
+        symbol = stock.get("symbol", "?")
+        price = stock.get("price")
+        change = stock.get("change")
+        change_pct = stock.get("change_pct")
+        market_state = stock.get("market_state")
+        line = f"  - {symbol}"
+        if price is not None:
+            line += f"  Price: ${price}"
+        if change is not None and change_pct is not None:
+            line += f"  Change: {change:+.2f} ({change_pct:+.2f}%)"
+        if market_state:
+            line += f"  Market: {market_state}"
+        prompt_lines.append(line)
+
+    prompt_lines.extend([
+        "",
+        "RULES:",
+        "1. Provide a recommendation for EACH stock in the watchlist.",
+        "2. Use EXACTLY this format per stock:",
+        "   [SYMBOL] → BUY / HOLD / SELL — [one short reason]",
+        "3. BUY = price up > 2% or positive trend",
+        "4. HOLD = price change between -2% and +2%",
+        "5. SELL = price down > 2% or negative trend",
+        "6. Be direct. No intro, no outro, no disclaimers.",
+        "7. Output one line per stock only.",
+    ])
+
+    system_prompt = (
+        "You are a professional stock market analyst. "
+        "Analyze price change data and give per-stock recommendations. "
+        "Always output one line per stock. "
+        "Never skip a stock. Never add commentary outside the recommendations."
+    )
+
+    try:
+        response = requests.post(
+            f"{LM_STUDIO_URL}/chat/completions",
+            json={
+                "model": LM_STUDIO_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "\n".join(prompt_lines)},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        raw = data["choices"][0]["message"]["content"]
+        return _parse_recommendations(raw)
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Could not connect to LM Studio at " + LM_STUDIO_URL
+    except Exception as e:
+        return f"⚠️ Recommendations error: {e}"
+
+
+class RecommendationResponse(BaseModel):
+    symbol: str | None
+    recommendation: str  # raw text from LLM or error message
+
+
 @app.on_event("startup")
 def startup():
     init_db()
+    if RECOMMENDATIONS_ENABLED:
+        _scheduler_task = threading.Thread(target=_recommendation_scheduler, daemon=True)
+        _scheduler_task.start()
 
 
 @app.get("/stocks")
-def list_stocks():
+def list_stocks(sort: str = "added_at"):
     with get_db() as conn:
         rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
         stocks = [dict(row) for row in rows]
@@ -127,7 +309,50 @@ def list_stocks():
         price_info = _get_stock_price(stock["symbol"])
         stock.update(price_info)
 
+    # Sort by requested field
+    if sort == "price":
+        stocks.sort(key=lambda s: s.get("price") or 0, reverse=True)
+    elif sort == "change_pct":
+        stocks.sort(key=lambda s: s.get("change_pct") or 0, reverse=True)
+    elif sort == "symbol":
+        stocks.sort(key=lambda s: s.get("symbol", ""))
+    # else: keep default added_at order
+
     return stocks
+
+
+@app.get("/stocks/{symbol}/history")
+def get_stock_history(symbol: str, period: str = "1mo"):
+    """Get historical price data for sparkline visualization."""
+    symbol = symbol.upper().strip()
+    period_map = {
+        "1d": "1d",
+        "5d": "5d",
+        "1m": "1mo",
+        "3m": "3mo",
+        "6m": "6mo",
+        "1y": "1y",
+        "2y": "2y",
+        "5y": "5y",
+    }
+    yf_period = period_map.get(period, "1mo")
+
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=yf_period)
+        if hist.empty:
+            return {"symbol": symbol, "period": period, "data": []}
+
+        points = []
+        for date, row in hist.iterrows():
+            points.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+            })
+        return {"symbol": symbol, "period": period, "data": points}
+    except Exception:
+        return {"symbol": symbol, "period": period, "data": []}
 
 
 @app.get("/stocks/{symbol}/price")
@@ -163,6 +388,38 @@ def delete_stock(symbol: str):
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail=f"Stock {symbol} not found in watchlist")
     return {"symbol": symbol, "status": "deleted"}
+
+
+@app.get("/recommendations")
+def get_recommendations():
+    """Get AI-powered buy/hold/sell recommendations for the watchlist."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
+        stocks = [dict(row) for row in rows]
+
+    if not stocks:
+        return {"recommendations": []}
+
+    # Fetch live price data for each stock
+    stocks_data = []
+    for stock in stocks:
+        price_info = _get_stock_price(stock["symbol"])
+        stock.update(price_info)
+        stocks_data.append(stock)
+
+    rec_data = _get_recommendations(stocks_data)
+    if isinstance(rec_data, str):
+        return {"recommendations": [], "error": rec_data}
+    return {"recommendations": rec_data}
+
+
+@app.get("/alerts")
+def get_alerts():
+    """Get pending BUY/SELL alerts for the frontend."""
+    with _alerts_lock:
+        alerts = list(_pending_alerts)
+        _pending_alerts.clear()
+    return {"alerts": alerts}
 
 
 @app.get("/", response_class=HTMLResponse)
