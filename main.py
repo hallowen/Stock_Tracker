@@ -174,7 +174,7 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
                     {"role": "user", "content": "\n".join(prompt_lines)},
                 ],
                 "temperature": 0.5,
-                "max_tokens": 1024,
+                "max_tokens": 4096,
             },
             timeout=30,
         )
