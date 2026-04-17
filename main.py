@@ -114,7 +114,7 @@ class StockInfo(BaseModel):
 
 
 # LM Studio configuration
-LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://172.237.41.253:1234/v1")
+LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://172.237.41.253:8000/v1")
 LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.6-35b-a3b")
 LM_STUDIO_ENABLED = os.getenv("LM_STUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
 
