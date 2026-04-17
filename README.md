@@ -34,10 +34,13 @@ pip install -r requirements.txt
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET`    | `/stocks` | List all watched stocks with live prices |
+| `GET`    | `/stocks?sort=added_at` | List all watched stocks with live prices (`sort` = `added_at`, `price`, `change_pct`, `symbol`) |
 | `POST`   | `/stocks` | Add a stock → `{"symbol": "AAPL"}` |
 | `DELETE` | `/stocks/{symbol}` | Remove a stock from watchlist |
 | `GET`    | `/stocks/{symbol}/price` | Get live price for a single stock |
+| `GET`    | `/stocks/{symbol}/history?period=1mo` | Get historical price data for sparkline visualization |
+| `GET`    | `/stocks/recommendations` | Get AI-generated BUY/SELL/HOLD recommendations |
+| `GET`    | `/alerts` | Get pending BUY/SELL alerts (cleared after read) |
 
 ---
 

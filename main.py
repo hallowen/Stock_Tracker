@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -10,6 +12,63 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="Stock Tracker")
+
+# Configuration
+RECOMMENDATION_INTERVAL = int(os.getenv("RECOMMENDATION_INTERVAL", "900"))  # seconds (default 15 min)
+RECOMMENDATIONS_ENABLED = os.getenv("RECOMMENDATIONS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# Global state for tracking signals
+_last_recommendations = {}  # {symbol: recommendation}
+_pending_alerts = []  # list of {symbol, type, reason, timestamp}
+_alerts_lock = threading.Lock()
+_scheduler_task = None
+
+# Lightweight price cache (30s TTL) to speed up repeated polls
+_price_cache = {}  # {symbol: {"data": dict, "ts": float}}
+_PRICE_CACHE_TTL = 30  # seconds
+
+
+def _recommendation_scheduler():
+    """Periodically fetch AI recommendations and detect BUY/SELL signals (runs in background thread)."""
+    global _last_recommendations, _pending_alerts
+    while True:
+        time.sleep(RECOMMENDATION_INTERVAL)
+        try:
+            with get_db() as conn:
+                rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
+                stocks = [dict(row) for row in rows]
+            if not stocks:
+                continue
+
+            stocks_data = []
+            for stock in stocks:
+                price_info = _get_stock_price(stock["symbol"])
+                stock.update(price_info)
+                stocks_data.append(stock)
+
+            rec_data = _get_recommendations(stocks_data)
+            if isinstance(rec_data, str):
+                continue
+
+            new_alerts = []
+            for rec in rec_data:
+                symbol = rec["symbol"]
+                rec_type = rec["recommendation"]
+                reason = rec["reason"]
+                if rec_type in ("BUY", "SELL") and symbol not in _last_recommendations:
+                    new_alerts.append({
+                        "symbol": symbol,
+                        "type": rec_type,
+                        "reason": reason,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                _last_recommendations[symbol] = rec_type
+
+            if new_alerts:
+                with _alerts_lock:
+                    _pending_alerts.extend(new_alerts)
+        except Exception:
+            pass
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stocks.db")
 
@@ -38,8 +97,21 @@ def init_db():
         conn.commit()
 
 
-def _get_stock_price(symbol: str) -> dict:
-    """Fetch current price info for a stock symbol using yfinance."""
+def _get_stock_price(symbol: str, use_cache: bool = True) -> dict:
+    """Fetch current price info for a stock symbol using yfinance (with lightweight TTL cache)."""
+    if use_cache:
+        cached = _price_cache.get(symbol)
+        if cached and (time.time() - cached["ts"]) < _PRICE_CACHE_TTL:
+            return cached["data"]
+
+    price_info = _fetch_stock_price_internal(symbol)
+    if use_cache:
+        _price_cache[symbol] = {"data": price_info, "ts": time.time()}
+    return price_info
+
+
+def _fetch_stock_price_internal(symbol: str) -> dict:
+    """Internal yfinance fetch without cache logic."""
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.fast_info
@@ -222,10 +294,13 @@ class RecommendationResponse(BaseModel):
 @app.on_event("startup")
 def startup():
     init_db()
+    if RECOMMENDATIONS_ENABLED:
+        _scheduler_task = threading.Thread(target=_recommendation_scheduler, daemon=True)
+        _scheduler_task.start()
 
 
 @app.get("/stocks")
-def list_stocks():
+def list_stocks(sort: str = "added_at"):
     with get_db() as conn:
         rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
         stocks = [dict(row) for row in rows]
@@ -234,7 +309,50 @@ def list_stocks():
         price_info = _get_stock_price(stock["symbol"])
         stock.update(price_info)
 
+    # Sort by requested field
+    if sort == "price":
+        stocks.sort(key=lambda s: s.get("price") or 0, reverse=True)
+    elif sort == "change_pct":
+        stocks.sort(key=lambda s: s.get("change_pct") or 0, reverse=True)
+    elif sort == "symbol":
+        stocks.sort(key=lambda s: s.get("symbol", ""))
+    # else: keep default added_at order
+
     return stocks
+
+
+@app.get("/stocks/{symbol}/history")
+def get_stock_history(symbol: str, period: str = "1mo"):
+    """Get historical price data for sparkline visualization."""
+    symbol = symbol.upper().strip()
+    period_map = {
+        "1d": "1d",
+        "5d": "5d",
+        "1m": "1mo",
+        "3m": "3mo",
+        "6m": "6mo",
+        "1y": "1y",
+        "2y": "2y",
+        "5y": "5y",
+    }
+    yf_period = period_map.get(period, "1mo")
+
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=yf_period)
+        if hist.empty:
+            return {"symbol": symbol, "period": period, "data": []}
+
+        points = []
+        for date, row in hist.iterrows():
+            points.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+            })
+        return {"symbol": symbol, "period": period, "data": points}
+    except Exception:
+        return {"symbol": symbol, "period": period, "data": []}
 
 
 @app.get("/stocks/{symbol}/price")
@@ -293,6 +411,15 @@ def get_recommendations():
     if isinstance(rec_data, str):
         return {"recommendations": [], "error": rec_data}
     return {"recommendations": rec_data}
+
+
+@app.get("/alerts")
+def get_alerts():
+    """Get pending BUY/SELL alerts for the frontend."""
+    with _alerts_lock:
+        alerts = list(_pending_alerts)
+        _pending_alerts.clear()
+    return {"alerts": alerts}
 
 
 @app.get("/", response_class=HTMLResponse)
