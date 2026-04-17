@@ -296,6 +296,75 @@
             color: var(--md-on-surface-variant);
         }
 
+        /* ===== AI Button ===== */
+        .ai-btn {
+            background: var(--md-primary-container);
+            color: var(--md-on-primary-container);
+            border: 1px solid var(--md-outline-variant);
+            border-radius: var(--md-radius-full);
+            padding: 8px 16px;
+            font-family: 'Google Sans', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, box-shadow 0.15s;
+            white-space: nowrap;
+            letter-spacing: 0.02em;
+        }
+        .ai-btn:hover {
+            box-shadow: 0 0 0 1px var(--md-primary);
+        }
+        .ai-btn:active { opacity: 0.85; }
+        .ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ===== Recommendations Card ===== */
+        .rec-card {
+            background: var(--md-surface-container);
+            border: 1px solid var(--md-outline);
+            border-radius: var(--md-radius-md);
+            margin-bottom: 8px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            max-height: 2000px;
+            opacity: 1;
+        }
+        .rec-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--md-primary-container);
+        }
+        .rec-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--md-on-primary-container);
+            letter-spacing: 0.03em;
+        }
+        .rec-close {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: var(--md-on-primary-container);
+            border-radius: var(--md-radius-full);
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s;
+        }
+        .rec-close:hover { background: rgba(0,0,0,0.15); }
+        .rec-body {
+            padding: 16px;
+            font-size: 0.85rem;
+            line-height: 1.7;
+            color: var(--md-on-surface);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
         /* ===== Empty State ===== */
         .empty-state {
             display: flex;
@@ -365,6 +434,7 @@
             <h1>Stock Tracker</h1>
             <div class="app-bar-subtitle">Real-time watchlist</div>
         </div>
+        <button id="recBtn" class="ai-btn" title="Get AI recommendations" onclick="fetchRecommendations()">🤖 AI Insights</button>
     </header>
 
     <!-- Search Bar -->
@@ -390,12 +460,13 @@
 
     <script>
         const API = "";
+        const REFRESH_INTERVAL = 20000; // 20 seconds
+        let refreshTimer = null;
 
         function showStatus(msg, type) {
             var el = document.getElementById("statusMsg");
             el.textContent = msg;
             el.className = "snackbar " + (type || "");
-            // force reflow for re-triggering animation
             el.offsetHeight;
             requestAnimationFrame(() => el.classList.add("show"));
             setTimeout(function() {
@@ -415,6 +486,12 @@
             return pct > 0 ? "▲" : "▼";
         }
 
+        // Auto-refresh: restart timer after each render
+        function startRefreshTimer() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(renderStocks, REFRESH_INTERVAL);
+        }
+
         async function renderStocks() {
             var list = document.getElementById("stockList");
             list.innerHTML = '<li class="loading"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></li>';
@@ -428,6 +505,7 @@
                         '<div class="empty-title">Watchlist is empty</div>' +
                         '<div class="empty-subtitle">Add a stock symbol above to start tracking your favorite tickers.</div>' +
                         '</li>';
+                    startRefreshTimer();
                     return;
                 }
                 list.innerHTML = "";
@@ -477,6 +555,7 @@
                         '</div>';
                     list.appendChild(li);
                 }
+                startRefreshTimer();
             } catch (e) {
                 showStatus("Failed to load stocks", "error");
                 list.innerHTML = '<li class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Load failed</div><div class="empty-subtitle">Check your connection and try again.</div></li>';
@@ -508,6 +587,52 @@
             } catch (e) {
                 showStatus(e.message, "error");
             }
+        }
+
+        async function fetchRecommendations() {
+            var btn = document.getElementById("recBtn");
+            btn.disabled = true;
+            btn.textContent = "⏳";
+            try {
+                var res = await fetch(API + "/recommendations");
+                if (!res.ok) throw new Error("Failed to fetch recommendations");
+                var data = await res.json();
+                showRecommendations(data.recommendations);
+            } catch (e) {
+                showStatus(e.message, "error");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "🤖 AI Insights";
+            }
+        }
+
+        function showRecommendations(text) {
+            var list = document.getElementById("stockList");
+            // Insert recommendations card at top
+            var recCard = document.createElement("li");
+            recCard.className = "rec-card";
+            recCard.innerHTML =
+                '<div class="rec-header">' +
+                    '<span class="rec-title">🤖 AI Insights</span>' +
+                    '<button class="rec-close" id="recCloseBtn" title="Dismiss">✕</button>' +
+                '</div>' +
+                '<div class="rec-body">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
+            list.insertBefore(recCard, list.firstChild);
+
+            document.getElementById("recCloseBtn").addEventListener("click", function() {
+                recCard.style.maxHeight = recCard.scrollHeight + "px";
+                requestAnimationFrame(() => {
+                    recCard.style.maxHeight = "0";
+                    recCard.style.opacity = "0";
+                });
+                setTimeout(function() { recCard.remove(); }, 300);
+            });
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement("div");
+            div.textContent = str;
+            return div.innerHTML;
         }
 
         document.getElementById("addForm").addEventListener("submit", function(e) {

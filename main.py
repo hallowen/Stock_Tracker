@@ -3,6 +3,7 @@ import os
 from contextlib import contextmanager
 from datetime import datetime
 
+import requests
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -112,6 +113,80 @@ class StockInfo(BaseModel):
     last_updated: str | None
 
 
+# LM Studio configuration
+LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://172.237.41.253:1234/v1")
+LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.6-35b-a3b")
+LM_STUDIO_ENABLED = os.getenv("LM_STUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def _get_recommendations(stocks_data: list[dict]) -> str:
+    """Send watchlist data to LM Studio for analysis."""
+    if not LM_STUDIO_ENABLED:
+        return "AI recommendations are disabled. Set LM_STUDIO_ENABLED=true to enable."
+
+    # Build prompt with watchlist data
+    prompt_lines = [
+        "You are a stock market analyst. Analyze the following watchlist and provide brief buy/hold/sell recommendations.",
+        "",
+        "Watchlist data:",
+    ]
+    for stock in stocks_data:
+        symbol = stock.get("symbol", "?")
+        price = stock.get("price")
+        change = stock.get("change")
+        change_pct = stock.get("change_pct")
+        market_state = stock.get("market_state")
+        line = f"  - {symbol}"
+        if price is not None:
+            line += f"  Price: ${price}"
+        if change is not None and change_pct is not None:
+            line += f"  Change: {change:+.2f} ({change_pct:+.2f}%)"
+        if market_state:
+            line += f"  Market: {market_state}"
+        prompt_lines.append(line)
+
+    prompt_lines.extend([
+        "",
+        "For each stock, provide a one-line recommendation (Buy / Hold / Sell) with a short reason (max 15 words).",
+        "Format: SYMBOL — Buy/Hold/Sell — reason",
+        "Be concise and practical.",
+    ])
+
+    system_prompt = (
+        "You are a professional stock market analyst. "
+        "Provide clear, concise recommendations based on price change data. "
+        "Use Buy for strong uptrend, Hold for neutral, Sell for downtrend. "
+        "Be direct — no disclaimers needed."
+    )
+
+    try:
+        response = requests.post(
+            f"{LM_STUDIO_URL}/chat/completions",
+            json={
+                "model": LM_STUDIO_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "\n".join(prompt_lines)},
+                ],
+                "temperature": 0.5,
+                "max_tokens": 1024,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.ConnectionError:
+        return "⚠️ Could not connect to LM Studio at " + LM_STUDIO_URL
+    except Exception as e:
+        return f"⚠️ Recommendations error: {e}"
+
+
+class RecommendationResponse(BaseModel):
+    symbol: str | None
+    recommendation: str  # raw text from LLM or error message
+
+
 @app.on_event("startup")
 def startup():
     init_db()
@@ -163,6 +238,27 @@ def delete_stock(symbol: str):
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail=f"Stock {symbol} not found in watchlist")
     return {"symbol": symbol, "status": "deleted"}
+
+
+@app.get("/recommendations")
+def get_recommendations():
+    """Get AI-powered buy/hold/sell recommendations for the watchlist."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
+        stocks = [dict(row) for row in rows]
+
+    if not stocks:
+        return {"recommendations": "Your watchlist is empty. Add some stocks first!"}
+
+    # Fetch live price data for each stock
+    stocks_data = []
+    for stock in stocks:
+        price_info = _get_stock_price(stock["symbol"])
+        stock.update(price_info)
+        stocks_data.append(stock)
+
+    rec_text = _get_recommendations(stocks_data)
+    return {"recommendations": rec_text}
 
 
 @app.get("/", response_class=HTMLResponse)
