@@ -298,24 +298,34 @@
 
         /* ===== AI Button ===== */
         .ai-btn {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             background: var(--md-primary-container);
             color: var(--md-on-primary-container);
             border: 1px solid var(--md-outline-variant);
             border-radius: var(--md-radius-full);
-            padding: 8px 16px;
-            font-family: 'Google Sans', sans-serif;
-            font-size: 0.8rem;
-            font-weight: 500;
+            font-size: 18px;
             cursor: pointer;
-            transition: background 0.15s, box-shadow 0.15s;
-            white-space: nowrap;
-            letter-spacing: 0.02em;
+            transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
         }
         .ai-btn:hover {
-            box-shadow: 0 0 0 1px var(--md-primary);
+            box-shadow: 0 0 0 2px var(--md-primary);
+            transform: scale(1.05);
         }
-        .ai-btn:active { opacity: 0.85; }
-        .ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ai-btn:active { transform: scale(0.95); }
+        .ai-btn:disabled {
+            opacity: 0.7;
+            cursor: wait;
+        }
+        .ai-btn.spinning {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
 
         /* ===== Recommendations Card ===== */
         .rec-card {
@@ -434,7 +444,7 @@
             <h1>Stock Tracker</h1>
             <div class="app-bar-subtitle">Real-time watchlist</div>
         </div>
-        <button id="recBtn" class="ai-btn" title="Get AI recommendations" onclick="fetchRecommendations()">🤖 AI Insights</button>
+        <button id="recBtn" class="ai-btn" title="Get AI recommendations" onclick="fetchRecommendations()">🤖</button>
     </header>
 
     <!-- Search Bar -->
@@ -460,7 +470,7 @@
 
     <script>
         const API = "";
-        const REFRESH_INTERVAL = 20000; // 20 seconds
+        const REFRESH_INTERVAL = 60000; // 60 seconds
         let refreshTimer = null;
 
         function showStatus(msg, type) {
