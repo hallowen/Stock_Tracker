@@ -119,8 +119,33 @@ LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.6-35b-a3b")
 LM_STUDIO_ENABLED = os.getenv("LM_STUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
 
 
+def _parse_recommendations(raw: str) -> list[dict]:
+    """Parse LLM response into per-stock recommendation dict."""
+    recommendations = []
+    lines = raw.strip().split("\n")
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Match patterns like: AAPL → BUY — reason
+        # or: AAPL → HOLD — reason
+        # or: AAPL → SELL — reason
+        import re
+        match = re.match(r'(\w+)\s*[→>]\s*(BUY|HOLD|SELL)\s*—?\s*(.*)', line, re.IGNORECASE)
+        if match:
+            symbol = match.group(1).upper()
+            rec = match.group(2).upper()
+            reason = match.group(3).strip() or "Based on price trend"
+            recommendations.append({
+                "symbol": symbol,
+                "recommendation": rec,
+                "reason": reason,
+            })
+    return recommendations
+
+
 def _get_recommendations(stocks_data: list[dict]) -> str:
-    """Send watchlist data to LM Studio for analysis."""
+    """Send watchlist data to LM Studio for analysis and return parsed recommendations."""
     if not LM_STUDIO_ENABLED:
         return "AI recommendations are disabled. Set LM_STUDIO_ENABLED=true to enable."
 
@@ -155,6 +180,7 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
         "4. HOLD = price change between -2% and +2%",
         "5. SELL = price down > 2% or negative trend",
         "6. Be direct. No intro, no outro, no disclaimers.",
+        "7. Output one line per stock only.",
     ])
 
     system_prompt = (
@@ -173,14 +199,15 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "\n".join(prompt_lines)},
                 ],
-                "temperature": 0.5,
+                "temperature": 0.1,
                 "max_tokens": 4096,
             },
-            timeout=30,
+            timeout=60,
         )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        raw = data["choices"][0]["message"]["content"]
+        return _parse_recommendations(raw)
     except requests.exceptions.ConnectionError:
         return "⚠️ Could not connect to LM Studio at " + LM_STUDIO_URL
     except Exception as e:
@@ -253,7 +280,7 @@ def get_recommendations():
         stocks = [dict(row) for row in rows]
 
     if not stocks:
-        return {"recommendations": "Your watchlist is empty. Add some stocks first!"}
+        return {"recommendations": []}
 
     # Fetch live price data for each stock
     stocks_data = []
@@ -262,8 +289,10 @@ def get_recommendations():
         stock.update(price_info)
         stocks_data.append(stock)
 
-    rec_text = _get_recommendations(stocks_data)
-    return {"recommendations": rec_text}
+    rec_data = _get_recommendations(stocks_data)
+    if isinstance(rec_data, str):
+        return {"recommendations": [], "error": rec_data}
+    return {"recommendations": rec_data}
 
 
 @app.get("/", response_class=HTMLResponse)

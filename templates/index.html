@@ -445,6 +445,7 @@
             <div class="app-bar-subtitle">Real-time watchlist</div>
         </div>
         <button id="recBtn" class="ai-btn" title="Get AI recommendations" onclick="fetchRecommendations()">🤖</button>
+        <button id="showRecBtn" class="ai-btn" title="Show recommendations" onclick="toggleRecommendations()" style="display:none;">💡</button>
     </header>
 
     <!-- Search Bar -->
@@ -543,7 +544,17 @@
                         priceDisplay = '<div class="no-data">No price data</div>';
                     }
 
+                    // Recommendation badge
+                    var recBadge = "";
+                    var rec = aiRecommendations[stock.symbol];
+                    if (rec && recommendationsVisible) {
+                        var recColor = rec.rec === "BUY" ? "var(--md-success)" : rec.rec === "SELL" ? "var(--md-error)" : "var(--md-warning)";
+                        recBadge = '<span class="chip chip-rec" style="background:' + recColor + ';color:#000;">' + rec.rec + '</span>' +
+                                   '<div class="chip chip-rec-reason">' + escapeHtml(rec.reason) + '</div>';
+                    }
+
                     var chipsHTML = '<div class="card-chips">';
+                    if (recBadge) chipsHTML += recBadge;
                     if (stock.market_state) {
                         chipsHTML += '<span class="chip chip-market">' + stock.market_state + '</span>';
                     }
@@ -599,48 +610,42 @@
             }
         }
 
+        var aiRecommendations = {};
+        var recommendationsVisible = false;
+
         async function fetchRecommendations() {
             var btn = document.getElementById("recBtn");
             btn.disabled = true;
-            btn.textContent = "⏳";
+            btn.classList.add("spinning");
+            showStatus("⏳ Fetching AI insights...", "success");
             try {
                 var res = await fetch(API + "/recommendations");
                 if (!res.ok) throw new Error("Failed to fetch recommendations");
                 var data = await res.json();
-                showRecommendations(data.recommendations);
+                aiRecommendations = {};
+                if (data.recommendations && data.recommendations.length > 0) {
+                    data.recommendations.forEach(function(r) {
+                        aiRecommendations[r.symbol] = { rec: r.recommendation, reason: r.reason };
+                    });
+                    document.getElementById("showRecBtn").style.display = "flex";
+                    showStatus("✅ AI insights loaded!", "success");
+                    renderStocks();
+                } else {
+                    if (data.error) showStatus(data.error, "error");
+                    else showStatus("No recommendations available", "error");
+                }
             } catch (e) {
                 showStatus(e.message, "error");
             } finally {
                 btn.disabled = false;
-                btn.textContent = "🤖 AI Insights";
+                btn.classList.remove("spinning");
             }
         }
 
-        function showRecommendations(text) {
-            // If it's an error/warning message, show as snackbar instead
-            if (text.startsWith("⚠️") || text.startsWith("Your watchlist is empty")) {
-                showStatus(text, "error");
-                return;
-            }
-            var list = document.getElementById("stockList");
-            var recCard = document.createElement("li");
-            recCard.className = "rec-card";
-            recCard.innerHTML =
-                '<div class="rec-header">' +
-                    '<span class="rec-title">🤖 AI Insights</span>' +
-                    '<button class="rec-close" id="recCloseBtn" title="Dismiss">✕</button>' +
-                '</div>' +
-                '<div class="rec-body">' + escapeHtml(text).replace(/\n/g, '<br>') + '</div>';
-            list.insertBefore(recCard, list.firstChild);
-
-            document.getElementById("recCloseBtn").addEventListener("click", function() {
-                recCard.style.maxHeight = recCard.scrollHeight + "px";
-                requestAnimationFrame(() => {
-                    recCard.style.maxHeight = "0";
-                    recCard.style.opacity = "0";
-                });
-                setTimeout(function() { recCard.remove(); }, 300);
-            });
+        function toggleRecommendations() {
+            recommendationsVisible = !recommendationsVisible;
+            document.getElementById("showRecBtn").textContent = recommendationsVisible ? "🙈" : "💡";
+            renderStocks();
         }
 
         function escapeHtml(str) {
