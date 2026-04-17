@@ -529,12 +529,6 @@
             <button class="toolbar-btn" data-sort="change_pct" onclick="setSort('change_pct', this)">Change</button>
             <button class="toolbar-btn" data-sort="symbol" onclick="setSort('symbol', this)">Name</button>
         </div>
-        <div class="toolbar-segmented">
-            <button class="toolbar-btn period-btn active" data-period="1d" onclick="setPeriod('1d', this)">1D</button>
-            <button class="toolbar-btn period-btn" data-period="5d" onclick="setPeriod('5d', this)">5D</button>
-            <button class="toolbar-btn period-btn" data-period="1m" onclick="setPeriod('1m', this)">1M</button>
-            <button class="toolbar-btn period-btn" data-period="1y" onclick="setPeriod('1y', this)">1Y</button>
-        </div>
     </div>
 
     <!-- Snackbar -->
@@ -554,7 +548,6 @@
         const REFRESH_INTERVAL = 60000; // 60 seconds
         let refreshTimer = null;
         var currentSort = "added_at";
-        var currentPeriod = "1m";
         var sparklineData = {};
 
         function showStatus(msg, type) {
@@ -588,14 +581,7 @@
 
         function setSort(sort, btn) {
             currentSort = sort;
-            document.querySelectorAll('.toolbar-segmented:first-of-type .toolbar-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            renderStocks();
-        }
-
-        function setPeriod(period, btn) {
-            currentPeriod = period;
-            document.querySelectorAll('.toolbar-segmented:last-of-type .toolbar-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.toolbar-segmented .toolbar-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             renderStocks();
         }
@@ -708,9 +694,9 @@
                 list.innerHTML = "";
                 var symbols = stocks.map(function(s) { return s.symbol; });
 
-                // Batch-fetch all sparklines upfront
+                // Batch-fetch all sparklines upfront (fixed default period)
                 var fetchPromises = symbols.map(function(sym) {
-                    return fetch(API + '/stocks/' + sym + '/history?period=' + currentPeriod)
+                    return fetch(API + '/stocks/' + sym + '/history')
                         .then(r => r.json())
                         .catch(() => ({ symbol: sym, data: [] }));
                 });
