@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e17;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .container { max-width: 600px; width: 100%; }
+        h1 {
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #00d2ff, #7b2ff7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle { text-align: center; color: #666; margin-bottom: 32px; font-size: 0.9rem; }
+        .add-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 32px;
+        }
+        .add-form input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #1e2a3a;
+            border-radius: 8px;
+            background: #111827;
+            color: #fff;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .add-form input:focus { border-color: #7b2ff7; }
+        .add-form input::placeholder { color: #444; }
+        .add-form button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #00d2ff, #7b2ff7);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            white-space: nowrap;
+        }
+        .add-form button:hover { opacity: 0.85; }
+        .add-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status-msg {
+            text-align: center;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+            min-height: 20px;
+        }
+        .status-msg.success { color: #00d26a; }
+        .status-msg.error { color: #ff4d6a; }
+        .stock-list { list-style: none; }
+        .stock-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            margin-bottom: 10px;
+            background: #111827;
+            border: 1px solid #1e2a3a;
+            border-radius: 10px;
+            transition: border-color 0.2s, transform 0.15s;
+        }
+        .stock-item:hover {
+            border-color: #3a4a5a;
+            transform: translateY(-1px);
+        }
+        .stock-symbol {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        .stock-price {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin-top: 4px;
+        }
+        .stock-change {
+            font-size: 0.85rem;
+            margin-top: 2px;
+        }
+        .stock-change.positive { color: #00d26a; }
+        .stock-change.negative { color: #ff4d6a; }
+        .stock-change.neutral { color: #888; }
+        .stock-market-state {
+            font-size: 0.75rem;
+            color: #555;
+            margin-top: 2px;
+        }
+        .stock-added { font-size: 0.75rem; color: #555; margin-top: 2px; }
+        .delete-btn {
+            padding: 8px 14px;
+            border: 1px solid #3a1a1a;
+            border-radius: 6px;
+            background: #1a0a0a;
+            color: #ff4d6a;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .delete-btn:hover { background: #2a1515; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #444;
+        }
+        .empty-state svg { margin-bottom: 16px; }
+        .empty-state p { font-size: 0.95rem; }
+        @media (max-width: 500px) {
+            .stock-item { flex-wrap: wrap; gap: 10px; }
+            .delete-btn { width: 100%; text-align: center; }
+            .add-form { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Stock Tracker</h1>
+        <p class="subtitle">Track your stock watchlist</p>
+        <form class="add-form" id="addForm">
+            <input type="text" id="symbolInput" placeholder="Enter stock symbol (e.g., AAPL)" required maxlength="10" autocomplete="off">
+            <button type="submit" id="addBtn">Add Stock</button>
+        </form>
+        <div class="status-msg" id="statusMsg"></div>
+        <ul class="stock-list" id="stockList"></ul>
+    </div>
+    <script>
+        const API = "";
+
+        function showStatus(msg, type) {
+            var el = document.getElementById("statusMsg");
+            el.textContent = msg;
+            el.className = "status-msg " + type;
+            if (type === "success") {
+                setTimeout(function() { el.textContent = ""; el.className = "status-msg"; }, 3000);
+            }
+        }
+
+        function formatDate(iso) {
+            return new Date(iso).toLocaleDateString("en-US", {
+                month: "short", day: "numeric", year: "numeric",
+                hour: "2-digit", minute: "2-digit"
+            });
+        }
+
+        async function renderStocks() {
+            var list = document.getElementById("stockList");
+            try {
+                var res = await fetch(API + "/stocks");
+                if (!res.ok) throw new Error("Failed to fetch stocks");
+                var stocks = await res.json();
+                if (stocks.length === 0) {
+                    list.innerHTML = '<div class="empty-state"><svg width="48" height="48" fill="none" stroke="#333" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 17l4-4 4 4 4-8 4 4"/></svg><p>Your watchlist is empty.<br>Add a stock symbol above to get started.</p></div>';
+                    return;
+                }
+                list.innerHTML = "";
+                for (var i = 0; i < stocks.length; i++) {
+                    var stock = stocks[i];
+                    var li = document.createElement("li");
+                    li.className = "stock-item";
+
+                    var priceDisplay = "";
+                    if (stock.price !== null && stock.price !== undefined) {
+                        var changeClass = "";
+                        var changeSign = "";
+                        if (stock.change !== null && stock.change !== undefined) {
+                            if (stock.change > 0) {
+                                changeClass = "positive";
+                                changeSign = "+";
+                            } else if (stock.change < 0) {
+                                changeClass = "negative";
+                                changeSign = "";
+                            } else {
+                                changeClass = "neutral";
+                                changeSign = "";
+                            }
+                        }
+                        var currency = stock.currency || "";
+                        priceDisplay = '<div class="stock-price">$' + stock.price.toFixed(2) + ' ' + currency + '</div>' +
+                            '<div class="stock-change ' + changeClass + '">' + changeSign + (stock.change !== null ? stock.change.toFixed(2) : '0.00') + ' (' + (stock.change_pct !== null ? (stock.change_pct > 0 ? '+' : '') : '') + stock.change_pct + '%)' + '</div>';
+                    } else {
+                        priceDisplay = '<div class="stock-price">No price data</div>';
+                    }
+
+                    var marketState = "";
+                    if (stock.market_state) {
+                        marketState = '<div class="stock-market-state">' + stock.market_state + '</div>';
+                    }
+
+                    li.innerHTML = '<div class="stock-info"><div class="stock-symbol">' + stock.symbol + '</div>' + priceDisplay + marketState + '<div class="stock-added">Added ' + formatDate(stock.added_at) + '</div></div><button class="delete-btn" data-symbol="' + stock.symbol + '">Delete</button>';
+                    list.appendChild(li);
+                }
+            } catch (e) {
+                showStatus("Failed to load stocks", "error");
+            }
+        }
+
+        async function addStock(symbol) {
+            try {
+                var res = await fetch(API + "/stocks", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ symbol: symbol.toUpperCase() })
+                });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to add");
+                showStatus(data.symbol + " added to watchlist", "success");
+                await renderStocks();
+            } catch (e) {
+                showStatus(e.message, "error");
+            }
+        }
+
+        async function deleteStock(symbol) {
+            try {
+                var res = await fetch(API + "/stocks/" + symbol, { method: "DELETE" });
+                if (!res.ok) throw new Error("Failed to delete");
+                showStatus(symbol + " removed from watchlist", "success");
+                await renderStocks();
+            } catch (e) {
+                showStatus(e.message, "error");
+            }
+        }
+
+        document.getElementById("addForm").addEventListener("submit", function(e) {
+            e.preventDefault();
+            var input = document.getElementById("symbolInput");
+            var symbol = input.value.trim();
+            if (symbol) {
+                addStock(symbol);
+                input.value = "";
+            }
+        });
+
+        document.getElementById("stockList").addEventListener("click", async function(e) {
+            if (e.target.classList.contains("delete-btn")) {
+                var symbol = e.target.dataset.symbol;
+                if (confirm("Remove " + symbol + " from watchlist?")) {
+                    await deleteStock(symbol);
+                }
+            }
+        });
+
+        renderStocks();
+    </script>
+</body>
+</html>

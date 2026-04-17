@@ -1,6 +1,6 @@
 # Stock Tracker
 
-A stock tracking application.
+A stock watchlist application built with FastAPI. Track stock symbols and view real-time prices fetched via yfinance.
 
 ## Getting Started
 
@@ -23,20 +23,35 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Usage
+### Running the App
 
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
+
+Open [http://localhost:8000](http://localhost:8000) in your browser.
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/stocks` | List all watched stocks with live prices |
+| `POST` | `/stocks` | Add a stock to the watchlist (body: `{"symbol": "AAPL"}`) |
+| `DELETE` | `/stocks/{symbol}` | Remove a stock from the watchlist |
+| `GET` | `/stocks/{symbol}/price` | Get live price for a single stock |
 
 ## Project Structure
 
 ```
 Stock_Tracker/
-├── .gitignore
-├── README.md
+├── .github/
+│   └── copilot-instructions.md
+├── templates/
+│   └── index.html
+├── main.py
 ├── requirements.txt
-└── main.py
+├── stocks.db
+└── README.md
 ```
 
 ## License
