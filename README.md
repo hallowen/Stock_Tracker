@@ -1,59 +1,62 @@
-# Stock Tracker
+# 📈 Stock Tracker
 
-A stock watchlist application built with FastAPI. Track stock symbols and view real-time prices fetched via yfinance.
+A real-time stock watchlist application built with **FastAPI** and **yfinance**. Add symbols, track live prices, and monitor market states — all from a sleek dark-themed dashboard.
 
-## Getting Started
+---
 
-### Prerequisites
-
-- Python 3.x
-
-### Installation
+## ⚡ Quick Start
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd Stock_Tracker
-
-# Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+git clone <repository-url> && cd Stock_Tracker
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### Running the App
-
-```bash
 uvicorn main:app --reload
 ```
 
-Open [http://localhost:8000](http://localhost:8000) in your browser.
+Open [http://localhost:8000](http://localhost:8000) 🚀
 
-## API Endpoints
+---
+
+## 📦 Installation
+
+| Requirement | Details |
+|-------------|---------|
+| **Python** | 3.x or later |
+| **Dependencies** | `fastapi[standard]`, `uvicorn>=0.30.0`, `yfinance>=0.2.40` |
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 🌐 API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/stocks` | List all watched stocks with live prices |
-| `POST` | `/stocks` | Add a stock to the watchlist (body: `{"symbol": "AAPL"}`) |
-| `DELETE` | `/stocks/{symbol}` | Remove a stock from the watchlist |
-| `GET` | `/stocks/{symbol}/price` | Get live price for a single stock |
+| `GET`    | `/stocks` | List all watched stocks with live prices |
+| `POST`   | `/stocks` | Add a stock → `{"symbol": "AAPL"}` |
+| `DELETE` | `/stocks/{symbol}` | Remove a stock from watchlist |
+| `GET`    | `/stocks/{symbol}/price` | Get live price for a single stock |
 
-## Project Structure
+---
+
+## 📂 Project Structure
 
 ```
 Stock_Tracker/
 ├── .github/
-│   └── copilot-instructions.md
+│   └── copilot-instructions.md   # AI assistant guidelines
 ├── templates/
-│   └── index.html
-├── main.py
+│   └── index.html                # SPA dashboard (vanilla JS)
+├── main.py                       # FastAPI app — routes, DB, yfinance
 ├── requirements.txt
-├── stocks.db
+├── stocks.db                     # SQLite (gitignored)
 └── README.md
 ```
 
-## License
+---
+
+## 📝 License
 
 MIT
