@@ -48,6 +48,7 @@ Thumbs.db
 *.log
 
 # Data files (if any)
+stocks.db
 *.json
 *.csv
 *.db

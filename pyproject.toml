@@ -1,0 +1,18 @@
+[project]
+name = "stock-tracker"
+version = "1.0.0"
+description = "Real-time stock watchlist dashboard with AI-powered recommendations"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi[standard]>=0.115.0",
+    "uvicorn>=0.30.0",
+    "yfinance>=0.2.40",
+    "requests>=2.31.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools.packages.find]
+where = ["."]

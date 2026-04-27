@@ -1,38 +1,53 @@
 import sqlite3
 import os
+import re
+import logging
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
+import pandas as pd
 import requests
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+logger = logging.getLogger("stock_tracker")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
 app = FastAPI(title="Stock Tracker")
 
 # Configuration
-RECOMMENDATION_INTERVAL = int(os.getenv("RECOMMENDATION_INTERVAL", "900"))  # seconds (default 15 min)
+RECOMMENDATION_INTERVAL = int(os.getenv("RECOMMENDATION_INTERVAL", "900"))
 RECOMMENDATIONS_ENABLED = os.getenv("RECOMMENDATIONS_ENABLED", "true").lower() in ("true", "1", "yes")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
-# Global state for tracking signals
-_last_recommendations = {}  # {symbol: recommendation}
-_pending_alerts = []  # list of {symbol, type, reason, timestamp}
+# Global state
+_last_recommendations = {}
+_last_recommendations_full = []
+_last_recommendations_ts = 0
+_pending_alerts = []
 _alerts_lock = threading.Lock()
 _scheduler_task = None
+_shutdown_event = threading.Event()
 
-# Lightweight price cache (30s TTL) to speed up repeated polls
-_price_cache = {}  # {symbol: {"data": dict, "ts": float}}
-_PRICE_CACHE_TTL = 30  # seconds
+# Price cache with max size
+_price_cache = {}
+_price_cache_max = 100
+_PRICE_CACHE_TTL = 30
 
 
 def _recommendation_scheduler():
     """Periodically fetch AI recommendations and detect BUY/SELL signals (runs in background thread)."""
-    global _last_recommendations, _pending_alerts
-    while True:
-        time.sleep(RECOMMENDATION_INTERVAL)
+    global _last_recommendations, _last_recommendations_full, _last_recommendations_ts, _pending_alerts
+    logger.info("Recommendation scheduler started (interval=%ds)", RECOMMENDATION_INTERVAL)
+    while not _shutdown_event.is_set():
+        _shutdown_event.wait(RECOMMENDATION_INTERVAL)
+        if _shutdown_event.is_set():
+            break
         try:
             with get_db() as conn:
                 rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
@@ -48,7 +63,11 @@ def _recommendation_scheduler():
 
             rec_data = _get_recommendations(stocks_data)
             if isinstance(rec_data, str):
+                logger.warning("Scheduler: %s", rec_data)
                 continue
+
+            _last_recommendations_full = rec_data
+            _last_recommendations_ts = time.time()
 
             new_alerts = []
             for rec in rec_data:
@@ -60,15 +79,17 @@ def _recommendation_scheduler():
                         "symbol": symbol,
                         "type": rec_type,
                         "reason": reason,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 _last_recommendations[symbol] = rec_type
 
             if new_alerts:
                 with _alerts_lock:
                     _pending_alerts.extend(new_alerts)
-        except Exception:
-            pass
+                logger.info("Generated %d new alerts", len(new_alerts))
+        except Exception as e:
+            logger.error("Scheduler error: %s", e)
+    logger.info("Recommendation scheduler stopped")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "stocks.db")
 
@@ -106,6 +127,13 @@ def _get_stock_price(symbol: str, use_cache: bool = True) -> dict:
 
     price_info = _fetch_stock_price_internal(symbol)
     if use_cache:
+        # Enforce max cache size (evict oldest entry)
+        if len(_price_cache) >= _price_cache_max:
+            try:
+                oldest = min(_price_cache, key=lambda k: _price_cache[k]["ts"])
+                del _price_cache[oldest]
+            except (ValueError, KeyError):
+                pass
         _price_cache[symbol] = {"data": price_info, "ts": time.time()}
     return price_info
 
@@ -137,7 +165,7 @@ def _fetch_stock_price_internal(symbol: str) -> dict:
         if hasattr(info, 'currency'):
             currency = info.currency
 
-        market_state = "pre"
+        market_state = None
         if hasattr(info, 'market_state'):
             state_map = {
                 "pre": "Pre-Market",
@@ -154,7 +182,7 @@ def _fetch_stock_price_internal(symbol: str) -> dict:
             "change_pct": change_pct,
             "currency": currency,
             "market_state": market_state,
-            "last_updated": datetime.utcnow().isoformat(),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
     except Exception:
         return {
@@ -163,7 +191,7 @@ def _fetch_stock_price_internal(symbol: str) -> dict:
             "change_pct": None,
             "currency": None,
             "market_state": None,
-            "last_updated": datetime.utcnow().isoformat(),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
 
 
@@ -171,24 +199,10 @@ class StockAdd(BaseModel):
     symbol: str
 
 
-class StockPrice(BaseModel):
-    symbol: str
-
-
-class StockInfo(BaseModel):
-    symbol: str
-    price: float | None
-    change: float | None
-    change_pct: float | None
-    currency: str | None
-    market_state: str | None
-    last_updated: str | None
-
-
-# LM Studio configuration
-LM_STUDIO_URL = os.getenv("LM_STUDIO_URL", "http://172.237.41.253:8000/v1")
-LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3.6-35b-a3b")
-LM_STUDIO_ENABLED = os.getenv("LM_STUDIO_ENABLED", "true").lower() in ("true", "1", "yes")
+# Ollama configuration
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-v4-flash:cloud")
+OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "true").lower() in ("true", "1", "yes")
 
 
 def _parse_recommendations(raw: str) -> list[dict]:
@@ -199,10 +213,6 @@ def _parse_recommendations(raw: str) -> list[dict]:
         line = line.strip()
         if not line:
             continue
-        # Match patterns like: AAPL → BUY — reason
-        # or: AAPL → HOLD — reason
-        # or: AAPL → SELL — reason
-        import re
         match = re.match(r'(\w+)\s*[→>]\s*(BUY|HOLD|SELL)\s*—?\s*(.*)', line, re.IGNORECASE)
         if match:
             symbol = match.group(1).upper()
@@ -217,9 +227,9 @@ def _parse_recommendations(raw: str) -> list[dict]:
 
 
 def _get_recommendations(stocks_data: list[dict]) -> str:
-    """Send watchlist data to LM Studio for analysis and return parsed recommendations."""
-    if not LM_STUDIO_ENABLED:
-        return "AI recommendations are disabled. Set LM_STUDIO_ENABLED=true to enable."
+    """Send watchlist data to Ollama for analysis and return parsed recommendations."""
+    if not OLLAMA_ENABLED:
+        return "AI recommendations are disabled. Set OLLAMA_ENABLED=true to enable."
 
     # Build prompt with watchlist data
     prompt_lines = [
@@ -264,9 +274,9 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
 
     try:
         response = requests.post(
-            f"{LM_STUDIO_URL}/chat/completions",
+            f"{OLLAMA_URL}/chat/completions",
             json={
-                "model": LM_STUDIO_MODEL,
+                "model": OLLAMA_MODEL,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "\n".join(prompt_lines)},
@@ -281,22 +291,58 @@ def _get_recommendations(stocks_data: list[dict]) -> str:
         raw = data["choices"][0]["message"]["content"]
         return _parse_recommendations(raw)
     except requests.exceptions.ConnectionError:
-        return "⚠️ Could not connect to LM Studio at " + LM_STUDIO_URL
+        return "⚠️ Could not connect to Ollama at " + OLLAMA_URL
     except Exception as e:
         return f"⚠️ Recommendations error: {e}"
-
-
-class RecommendationResponse(BaseModel):
-    symbol: str | None
-    recommendation: str  # raw text from LLM or error message
 
 
 @app.on_event("startup")
 def startup():
     init_db()
     if RECOMMENDATIONS_ENABLED:
+        global _scheduler_task
         _scheduler_task = threading.Thread(target=_recommendation_scheduler, daemon=True)
         _scheduler_task.start()
+        logger.info("Startup complete")
+
+
+@app.on_event("shutdown")
+def shutdown():
+    logger.info("Shutting down...")
+    _shutdown_event.set()
+
+
+@app.get("/health")
+def health():
+    """Health check endpoint."""
+    db_ok = False
+    try:
+        with get_db() as conn:
+            conn.execute("SELECT 1")
+            db_ok = True
+    except Exception:
+        pass
+    ollama_ok = False
+    if OLLAMA_ENABLED:
+        try:
+            r = requests.get(f"{OLLAMA_URL}/models", timeout=5)
+            ollama_ok = r.ok
+        except Exception:
+            pass
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": db_ok,
+        "ollama": ollama_ok if OLLAMA_ENABLED else "disabled",
+        "stocks_watched": _get_stock_count(),
+    }
+
+
+def _get_stock_count() -> int:
+    try:
+        with get_db() as conn:
+            return conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+    except Exception:
+        return 0
 
 
 @app.get("/stocks")
@@ -305,9 +351,13 @@ def list_stocks(sort: str = "added_at"):
         rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
         stocks = [dict(row) for row in rows]
 
-    for stock in stocks:
-        price_info = _get_stock_price(stock["symbol"])
-        stock.update(price_info)
+    # Parallelize price fetching
+    def fetch_price(s):
+        s.update(_get_stock_price(s["symbol"]))
+        return s
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        stocks = list(executor.map(fetch_price, stocks))
 
     # Sort by requested field
     if sort == "price":
@@ -371,7 +421,7 @@ def add_stock(stock: StockAdd):
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO stocks (symbol, added_at) VALUES (?, ?)",
-                (symbol, datetime.utcnow().isoformat()),
+                (symbol, datetime.now(timezone.utc).isoformat()),
             )
             conn.commit()
     except sqlite3.IntegrityError:
@@ -392,7 +442,17 @@ def delete_stock(symbol: str):
 
 @app.get("/recommendations")
 def get_recommendations():
-    """Get AI-powered buy/hold/sell recommendations for the watchlist."""
+    """Get AI-powered buy/hold/sell recommendations for the watchlist.
+    Returns cached recommendations from the background scheduler if available,
+    otherwise fetches fresh data synchronously."""
+    global _last_recommendations_full, _last_recommendations_ts
+
+    # Use cached recommendations if fresh (within 2x the recommendation interval)
+    cache_age = time.time() - _last_recommendations_ts if _last_recommendations_ts else float('inf')
+    if _last_recommendations_full and cache_age < RECOMMENDATION_INTERVAL * 2:
+        return {"recommendations": _last_recommendations_full, "cached": True, "age_seconds": int(cache_age)}
+
+    # Fall back to synchronous fetch if no cache
     with get_db() as conn:
         rows = conn.execute("SELECT symbol, added_at FROM stocks ORDER BY added_at DESC").fetchall()
         stocks = [dict(row) for row in rows]
@@ -400,7 +460,6 @@ def get_recommendations():
     if not stocks:
         return {"recommendations": []}
 
-    # Fetch live price data for each stock
     stocks_data = []
     for stock in stocks:
         price_info = _get_stock_price(stock["symbol"])
@@ -410,7 +469,12 @@ def get_recommendations():
     rec_data = _get_recommendations(stocks_data)
     if isinstance(rec_data, str):
         return {"recommendations": [], "error": rec_data}
-    return {"recommendations": rec_data}
+
+    # Update cache
+    _last_recommendations_full = rec_data
+    _last_recommendations_ts = time.time()
+
+    return {"recommendations": rec_data, "cached": False}
 
 
 @app.get("/alerts")
